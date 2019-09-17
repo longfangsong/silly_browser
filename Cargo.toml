@@ -1,0 +1,16 @@
+[package]
+name = "silly_browser"
+version = "0.1.0"
+authors = ["longfangsong <longfangsong@icloud.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+conrod_core = "0.67"
+conrod_glium = "0.67"
+conrod_winit = "0.67"
+winit = "0.19"
+glium = "0.24"
+find_folder = "0.3.0"
+html5ever = "0.23.0"
