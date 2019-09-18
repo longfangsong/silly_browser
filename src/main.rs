@@ -20,8 +20,10 @@ use html5ever::parse_document;
 use html5ever::rcdom::{Handle, NodeData, RcDom};
 use html5ever::tendril::TendrilSink;
 
+use crate::parser::parse;
 use crate::support::{EventLoop, GliumDisplayWinitWrapper};
 
+mod parser;
 mod support;
 widget_ids!(struct Ids {
         canvas,
@@ -43,8 +45,8 @@ struct Context {
 lazy_static! {
     static ref HEADER_SIZE: HashMap<u8, f64> = {
         let mut m = HashMap::new();
-        m.insert(1u8, 72.0);
-        m.insert(2u8, 64.0);
+        m.insert(1u8, 68.0);
+        m.insert(2u8, 60.0);
         m.insert(3u8, 52.0);
         m.insert(4u8, 36.0);
         m.insert(5u8, 28.0);
@@ -164,17 +166,7 @@ fn render_url_input_area(ui: &mut UiCell, ids: &mut Ids, state: &mut Context) {
         .mid_right_with_margin_on(ids.url_input_area, 10.0)
         .set(ids.visit_button, ui);
     for _event in go_button {
-        let current_uri = &state.current_url_input["http://".len()..];
-        let uri = current_uri.splitn(2, '/').collect::<Vec<_>>();
-        let (host, sub) = (uri[0], uri[1]);
-        let mut content = String::new();
-        let mut stream = net::TcpStream::connect(format!("{}", host)).unwrap();
-        stream.write(("GET ".to_string() + "/" + sub + " HTTP/1.1\r\nConnection: close\r\n\r\n").as_bytes())
-            .expect("send request failed");
-        stream.read_to_string(&mut content).expect("read response failed");
-        stream.shutdown(Shutdown::Both).unwrap_or(());
-        let body_end = content.find("\r\n\r\n");
-        state.dom_string = content[body_end.unwrap()..].to_string();
+        refresh_page(state);
         ids.elements.resize(0, &mut ui.widget_id_generator())
     }
 }
@@ -217,18 +209,8 @@ fn render_tag(ui: &mut UiCell,
                     }
                     for _click in the_widget.set(ids.elements[*current_id_index], ui) {
                         let url = href.unwrap().to_owned();
-                        let current_uri = &url["http://".len()..];
-                        let uri = current_uri.splitn(2, '/').collect::<Vec<_>>();
-                        let (host, sub) = (uri[0], uri[1]);
-                        let mut content = String::new();
-                        let mut stream = net::TcpStream::connect(format!("{}", host)).unwrap();
-                        stream.write(("GET ".to_string() + "/" + sub + " HTTP/1.1\r\nConnection: close\r\n\r\n").as_bytes())
-                            .expect("send request failed");
-                        stream.read_to_string(&mut content).expect("read response failed");
-                        stream.shutdown(Shutdown::Both).unwrap_or(());
-                        let body_end = content.find("\r\n\r\n");
                         state.current_url_input = url;
-                        state.dom_string = content[body_end.unwrap()..].to_string();
+                        refresh_page(state);
                         ids.elements.resize(0, &mut ui.widget_id_generator());
                         ids.elements.resize(1000, &mut ui.widget_id_generator());
                     }
@@ -264,6 +246,25 @@ fn render_tag(ui: &mut UiCell,
             }
         }
         _ => ()
+    }
+}
+
+fn refresh_page(state: &mut Context) {
+    let current_uri = &state.current_url_input["http://".len()..];
+    let uri = current_uri.splitn(2, '/').collect::<Vec<_>>();
+    let (host, sub) = (uri[0], uri[1]);
+    let mut content = String::new();
+    let mut stream = net::TcpStream::connect(format!("{}", host)).unwrap();
+    stream.write(("GET ".to_string() + "/" + sub + " HTTP/1.1\r\nConnection: close\r\n\r\n").as_bytes())
+        .expect("send request failed");
+    stream.read_to_string(&mut content).expect("read response failed");
+    stream.shutdown(Shutdown::Both).unwrap_or(());
+    let parsed = parse(content.as_str());
+    if parsed.status_code == "301" {
+        state.current_url_input = parsed.headers.get("Location").unwrap().clone();
+        refresh_page(state);
+    } else {
+        state.dom_string = parsed.body;
     }
 }
 
