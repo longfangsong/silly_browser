@@ -2,13 +2,17 @@
 extern crate conrod_core;
 #[macro_use]
 extern crate html5ever;
+#[macro_use]
+extern crate lazy_static;
 
 use std::borrow::BorrowMut;
+use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net;
 use std::net::Shutdown;
 
 use conrod_core::{Borderable, Colorable, Labelable, Positionable, Sizeable, Ui, UiCell, widget, Widget};
+use conrod_core::text::Font;
 use conrod_core::widget::text_box::Event::Update;
 use conrod_glium::Renderer;
 use glium::Surface;
@@ -36,6 +40,17 @@ struct Context {
     pub dom_string: String,
 }
 
+lazy_static! {
+    static ref HEADER_SIZE: HashMap<u8, f64> = {
+        let mut m = HashMap::new();
+        m.insert(1u8, 72.0);
+        m.insert(2u8, 64.0);
+        m.insert(3u8, 52.0);
+        m.insert(4u8, 36.0);
+        m.insert(5u8, 28.0);
+        m
+    };
+}
 
 fn main() {
     const WIDTH: u32 = 800;
@@ -182,6 +197,12 @@ fn render_tag(ui: &mut UiCell,
                 } else {
                     state.light_font
                 };
+                let font_size = if let Some(header) = current_selector.iter().find(|it| it.starts_with('h') && it[1..].parse::<u8>().is_ok()) {
+                    let header_id = header[1..].parse::<u8>().unwrap();
+                    *HEADER_SIZE.get(&header_id).unwrap()
+                } else {
+                    30.0
+                };
                 let href = urls.last();
                 if current_selector.iter().find(|it| it.as_str() == "a").is_some() {
                     let mut the_widget = widget::Button::new()
@@ -213,7 +234,8 @@ fn render_tag(ui: &mut UiCell,
                     }
                 } else {
                     let mut the_widget = widget::Text::new(content)
-                        .w_h(20.0 * content.len() as f64, 30.0)
+                        .w_h(font_size / 2.0 * content.len() as f64, font_size)
+                        .font_size(font_size as u32)
                         .font_id(font_id);
                     if *current_id_index == 0usize {
                         the_widget = the_widget.top_left_of(ids.html_area);
