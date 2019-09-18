@@ -3,6 +3,7 @@ extern crate conrod_core;
 #[macro_use]
 extern crate html5ever;
 
+use std::borrow::BorrowMut;
 use std::io::{Read, Write};
 use std::net;
 use std::net::Shutdown;
@@ -32,8 +33,9 @@ struct Context {
     pub light_font: conrod_core::text::font::Id,
     pub bold_font: conrod_core::text::font::Id,
     pub current_url_input: String,
-    pub dom: RcDom,
+    pub dom_string: String,
 }
+
 
 fn main() {
     const WIDTH: u32 = 800;
@@ -59,9 +61,7 @@ fn main() {
         current_url_input: String::new(),
         light_font,
         bold_font,
-        dom: parse_document(RcDom::default(), Default::default())
-            .from_utf8()
-            .one(&include_bytes!("../example.html")[..]),
+        dom_string: include_str!("../example.html").to_string(),
     };
     'main: loop {
         for event in event_loop.next(&mut events_loop) {
@@ -157,11 +157,10 @@ fn render_url_input_area(ui: &mut UiCell, ids: &mut Ids, state: &mut Context) {
         stream.write(("GET ".to_string() + "/" + sub + " HTTP/1.1\r\nConnection: close\r\n\r\n").as_bytes())
             .expect("send request failed");
         stream.read_to_string(&mut content).expect("read response failed");
-        stream.shutdown(Shutdown::Both).expect("close tcp connection failed");
+        stream.shutdown(Shutdown::Both).unwrap_or(());
         let body_end = content.find("\r\n\r\n");
-        state.dom = parse_document(RcDom::default(), Default::default())
-            .from_utf8()
-            .one(content[body_end.unwrap()..].as_bytes());
+        state.dom_string = content[body_end.unwrap()..].to_string();
+        ids.elements.resize(0, &mut ui.widget_id_generator())
     }
 }
 
@@ -170,7 +169,8 @@ fn render_tag(ui: &mut UiCell,
               node: &Handle,
               state: &mut Context,
               current_selector: &mut Vec<String>,
-              current_id_index: &mut usize) {
+              current_id_index: &mut usize,
+              urls: &mut Vec<String>) {
     let children = node.children.borrow();
     match node.data {
         NodeData::Text { ref contents } => {
@@ -182,6 +182,7 @@ fn render_tag(ui: &mut UiCell,
                 } else {
                     state.light_font
                 };
+                let href = urls.last();
                 if current_selector.iter().find(|it| it.as_str() == "a").is_some() {
                     let mut the_widget = widget::Button::new()
                         .label(content)
@@ -193,7 +194,23 @@ fn render_tag(ui: &mut UiCell,
                     if *current_id_index == 0usize {
                         the_widget = the_widget.top_left_of(ids.html_area);
                     }
-                    for _click in the_widget.set(ids.elements[*current_id_index], ui) {}
+                    for _click in the_widget.set(ids.elements[*current_id_index], ui) {
+                        let url = href.unwrap().to_owned();
+                        let current_uri = &url["http://".len()..];
+                        let uri = current_uri.splitn(2, '/').collect::<Vec<_>>();
+                        let (host, sub) = (uri[0], uri[1]);
+                        let mut content = String::new();
+                        let mut stream = net::TcpStream::connect(format!("{}", host)).unwrap();
+                        stream.write(("GET ".to_string() + "/" + sub + " HTTP/1.1\r\nConnection: close\r\n\r\n").as_bytes())
+                            .expect("send request failed");
+                        stream.read_to_string(&mut content).expect("read response failed");
+                        stream.shutdown(Shutdown::Both).unwrap_or(());
+                        let body_end = content.find("\r\n\r\n");
+                        state.current_url_input = url;
+                        state.dom_string = content[body_end.unwrap()..].to_string();
+                        ids.elements.resize(0, &mut ui.widget_id_generator());
+                        ids.elements.resize(1000, &mut ui.widget_id_generator());
+                    }
                 } else {
                     let mut the_widget = widget::Text::new(content)
                         .w_h(20.0 * content.len() as f64, 30.0)
@@ -206,17 +223,22 @@ fn render_tag(ui: &mut UiCell,
                 *current_id_index += 1;
             }
         }
-        NodeData::Element { ref name, .. } => {
+        NodeData::Element { ref name, ref attrs, .. } => {
+            let tag_name = format!("{}", name.local);
+            if tag_name == "a" {
+                let href = format!("{}", attrs.borrow().first().map(|it| &it.value).unwrap());
+                urls.push(href);
+            }
             assert!(name.ns == ns!(html));
-            current_selector.push(format!("{}", name.local));
+            current_selector.push(tag_name);
             for child in children.iter() {
-                render_tag(ui, ids, child, state, current_selector, current_id_index);
+                render_tag(ui, ids, child, state, current_selector, current_id_index, urls);
             }
             current_selector.pop();
         }
         NodeData::Document { .. } => {
             for child in children.iter() {
-                render_tag(ui, ids, child, state, current_selector, current_id_index);
+                render_tag(ui, ids, child, state, current_selector, current_id_index, urls);
             }
         }
         _ => ()
@@ -247,8 +269,12 @@ fn render_html_content(ui: &mut UiCell, ids: &mut Ids, state: &mut Context) {
         .color(conrod_core::color::WHITE)
         .mid_bottom_of(ids.canvas)
         .set(ids.html_area, ui);
-    ids.elements.resize(count_tags(&state.dom.document.clone()), &mut ui.widget_id_generator());
+    let dom = parse_document(RcDom::default(), Default::default())
+        .from_utf8()
+        .one(state.dom_string.as_bytes());
+    ids.elements.resize(1000, &mut ui.widget_id_generator());
     let mut selector = vec![];
+    let mut urls = vec![];
     let mut current_id_index = 0;
-    render_tag(ui, ids, &state.dom.document.clone(), state, &mut selector, &mut current_id_index);
+    render_tag(ui, ids, &dom.document, state, &mut selector, &mut current_id_index, &mut urls);
 }
