@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use std;
+
 use glium;
 
 pub struct GliumDisplayWinitWrapper(pub glium::Display);
