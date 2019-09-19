@@ -263,7 +263,7 @@ fn refresh_page(state: &mut Context) {
     if parsed.status_code == "301" {
         state.current_url_input = parsed.headers.get("Location").unwrap().clone();
         refresh_page(state);
-    } else {
+    } else if parsed.headers.get("Content-Type") == Some(&"text/html".to_string()) {
         state.dom_string = parsed.body;
     }
 }
